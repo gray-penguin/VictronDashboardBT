@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="theme-color" content="#020617" />
+  <title>VictronDashboardBT</title>
+  <link rel="manifest" href="./manifest.json" />
+  <script>
+    // Applied before first paint so there's no flash of the wrong theme.
+    // App.tsx re-applies this on mount/change; this is just the early copy.
+    (function () {
+      var theme = 'dark';
+      try {
+        var raw = localStorage.getItem('victron_dashboard_bt_prefs');
+        theme = (raw && JSON.parse(raw).theme) || 'dark';
+      } catch (e) {}
+      document.documentElement.setAttribute('data-theme', theme);
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', theme === 'light' ? '#f1f5f9' : '#020617');
+    })();
+  </script>
+  <script type="module" crossorigin src="./assets/index-DVmjPKAo.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/index-Blb_-Yej.css">
+</head>
+<body class="bg-canvas text-ink">
+  <div id="root"></div>
+</body>
+</html>

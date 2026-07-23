@@ -1,0 +1,10 @@
+{
+  "name": "VictronDashboardBT",
+  "short_name": "VictronBT",
+  "description": "Single-screen live dashboard for Victron Bluetooth devices, no GX/Cerbo required",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#020617",
+  "theme_color": "#020617"
+}

@@ -1,0 +1,47 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Theme tokens (RGB triples, no commas, for Tailwind's rgb(var(..) / <alpha-value>)
+   opacity support). Dark is the default/original palette; light is a mirror
+   of the same weights, except canvas/surface which follow the "darker-white
+   page, white cards" convention carried over from VictronDashboard. */
+:root {
+  --color-canvas: 2 6 23; /* slate-950 */
+  --color-surface: 15 23 42; /* slate-900 */
+  --color-surface-2: 30 41 59; /* slate-800 */
+  --color-surface-3: 51 65 85; /* slate-700 */
+  --color-line: 30 41 59; /* slate-800 */
+  --color-line-2: 51 65 85; /* slate-700 */
+  --color-line-3: 71 85 105; /* slate-600 */
+  --color-ink: 255 255 255; /* white */
+  --color-ink-2: 226 232 240; /* slate-200 */
+  --color-ink-3: 203 213 225; /* slate-300 */
+  --color-ink-4: 148 163 184; /* slate-400 */
+  --color-ink-5: 100 116 139; /* slate-500 */
+  --color-ink-6: 71 85 105; /* slate-600 */
+  --color-ink-7: 51 65 85; /* slate-700 */
+  --color-ink-accent: 2 6 23; /* slate-950, fixed on the orange accent regardless of theme */
+}
+
+[data-theme='light'] {
+  --color-canvas: 241 245 249; /* slate-100 */
+  --color-surface: 255 255 255;
+  --color-surface-2: 241 245 249; /* slate-100 */
+  --color-surface-3: 226 232 240; /* slate-200 */
+  --color-line: 226 232 240; /* slate-200 */
+  --color-line-2: 203 213 225; /* slate-300 */
+  --color-line-3: 148 163 184; /* slate-400 */
+  --color-ink: 15 23 42; /* slate-900 */
+  --color-ink-2: 30 41 59; /* slate-800 */
+  --color-ink-3: 51 65 85; /* slate-700 */
+  --color-ink-4: 71 85 105; /* slate-600 */
+  --color-ink-5: 100 116 139; /* slate-500 */
+  --color-ink-6: 148 163 184; /* slate-400 */
+  --color-ink-7: 203 213 225; /* slate-300 */
+  --color-ink-accent: 2 6 23; /* slate-950, fixed */
+}
+
+body {
+  font-family: system-ui, -apple-system, sans-serif;
+}
