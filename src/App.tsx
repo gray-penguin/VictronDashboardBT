@@ -230,6 +230,9 @@ export default function App() {
                           </div>
                         </div>
                       )}
+                      <div className="text-sm text-ink-4">
+                        {fields.current.toFixed(2)}A &middot; {fields.soc.toFixed(0)}% SOC
+                      </div>
                       {decodedAt && (
                         <div className="text-xs text-ink-6 self-end pb-1">
                           updated {new Date(decodedAt).toLocaleTimeString()}

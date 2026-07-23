@@ -52,23 +52,69 @@ export interface BatteryMonitorFields {
   starterVoltage?: number;
   midpointVoltage?: number;
   temperatureC?: number;
+  current: number; // amps, signed (negative = discharging)
+  consumedAh: number; // amp-hours, negative = net consumption
+  soc: number; // state of charge, percent
+}
+
+// LSB-first bit reader — confirmed against real data: aux_mode (the first
+// bit-packed field, right after 8 bytes of plain uint16 fields) reads
+// correctly as `byte & 0b11` (the low 2 bits), meaning fields are packed
+// starting from each byte's least-significant bit, not most-significant.
+class BitReader {
+  private byteIndex = 0;
+  private bitIndex = 0;
+  constructor(private bytes: Uint8Array) {}
+
+  readUnsignedInt(numBits: number): number {
+    let result = 0;
+    let bitsRead = 0;
+    while (bitsRead < numBits) {
+      const bitsAvailable = 8 - this.bitIndex;
+      const bitsToRead = Math.min(bitsAvailable, numBits - bitsRead);
+      const mask = (1 << bitsToRead) - 1;
+      const bits = (this.bytes[this.byteIndex] >> this.bitIndex) & mask;
+      result |= bits << bitsRead;
+      bitsRead += bitsToRead;
+      this.bitIndex += bitsToRead;
+      if (this.bitIndex >= 8) {
+        this.bitIndex = 0;
+        this.byteIndex++;
+      }
+    }
+    return result >>> 0;
+  }
+
+  readSignedInt(numBits: number): number {
+    const raw = this.readUnsignedInt(numBits);
+    const signBit = 1 << (numBits - 1);
+    return raw & signBit ? raw - (1 << numBits) : raw;
+  }
 }
 
 // Field layout confirmed against the reference library's battery_monitor.py
 // (voltage/temperature values matched this device's real VictronConnect
-// reading almost exactly). The first 8 bytes are byte-aligned; aux_mode is
-// the low 2 bits of byte 8 (bit-packed fields beyond it — current,
-// consumed_ah, soc — aren't decoded here since this device never reports
-// them, having no current-sensing hardware).
+// reading almost exactly). The first 8 bytes are byte-aligned; aux_mode,
+// current, consumed_ah, and soc are bit-packed (not byte-aligned) starting
+// right after — a real shunt/battery-monitor device (unlike the Smart
+// Battery Sense, which has no current sensing) is expected to populate
+// current/consumedAh/soc with real, non-sentinel values. NOT yet verified
+// against real shunt hardware — check these against VictronConnect's own
+// current/SOC reading once a shunt's key is entered.
 export function parseBatteryMonitorFields(plain: Uint8Array): BatteryMonitorFields {
   const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
   const remainingMins = dv.getUint16(0, true);
   const voltage = dv.getInt16(2, true) / 100;
   const alarm = dv.getUint16(4, true);
   const auxRaw = dv.getUint16(6, true);
-  const auxMode = plain[8] & 0b11;
 
-  const fields: BatteryMonitorFields = { remainingMins, voltage, alarm, auxMode };
+  const bits = new BitReader(plain.slice(8));
+  const auxMode = bits.readUnsignedInt(2);
+  const current = bits.readSignedInt(22) / 1000;
+  const consumedAh = bits.readUnsignedInt(20) / -10;
+  const soc = bits.readUnsignedInt(10) / 10;
+
+  const fields: BatteryMonitorFields = { remainingMins, voltage, alarm, auxMode, current, consumedAh, soc };
   if (auxMode === 0) {
     fields.starterVoltage = (auxRaw > 0x7fff ? auxRaw - 0x10000 : auxRaw) / 100;
   } else if (auxMode === 1) {
