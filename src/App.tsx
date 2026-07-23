@@ -5,8 +5,16 @@ import {
   bytesToHex,
   decryptVictronAdvertisement,
   parseBatteryMonitorFields,
+  parseSolarChargerFields,
   VictronDecryptResult,
 } from './lib/victronCrypto';
+
+// Distinguishes report variants once the key-check byte confirms a report
+// actually decodes — readout_type alone (0x02 = battery monitor, 0x01 =
+// solar charger, per the reference library's own test fixtures) selects
+// which field layout to apply.
+const READOUT_TYPE_BATTERY_MONITOR = 0x02;
+const READOUT_TYPE_SOLAR_CHARGER = 0x01;
 
 function celsiusToFahrenheit(c: number): number {
   return (c * 9) / 5 + 32;
@@ -182,8 +190,12 @@ export default function App() {
                 </label>
                 <input
                   id={`key-${device.id}`}
+                  name={`key-${device.id}`}
                   type="text"
                   spellCheck={false}
+                  autoComplete="off"
+                  data-1p-ignore
+                  data-lpignore="true"
                   placeholder="paste hex key from VictronConnect"
                   value={keys[device.id] || ''}
                   onChange={(e) => setKeys((prev) => ({ ...prev, [device.id]: e.target.value }))}
@@ -191,7 +203,7 @@ export default function App() {
                 />
               </div>
 
-              {result?.keyCheckOk &&
+              {result?.keyCheckOk && result.readoutType === READOUT_TYPE_BATTERY_MONITOR &&
                 (() => {
                   const fields = parseBatteryMonitorFields(result.plainSkippingCheckByte);
                   return (
@@ -206,6 +218,30 @@ export default function App() {
                           </div>
                         </div>
                       )}
+                      {decodedAt && (
+                        <div className="text-xs text-ink-6 self-end pb-1">
+                          updated {new Date(decodedAt).toLocaleTimeString()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              {result?.keyCheckOk && result.readoutType === READOUT_TYPE_SOLAR_CHARGER &&
+                (() => {
+                  const fields = parseSolarChargerFields(result.plainSkippingCheckByte);
+                  return (
+                    <div className="mt-3 flex items-baseline gap-6">
+                      <div>
+                        <div className="text-3xl font-bold text-ink">{fields.solarPowerW}W</div>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-ink">{(fields.yieldTodayWh / 1000).toFixed(2)}kWh</div>
+                        <div className="text-xs text-ink-5">today</div>
+                      </div>
+                      <div className="text-sm text-ink-4">
+                        {fields.voltage.toFixed(2)}V &middot; {fields.current.toFixed(1)}A &middot;{' '}
+                        {fields.chargeStateLabel}
+                      </div>
                       {decodedAt && (
                         <div className="text-xs text-ink-6 self-end pb-1">
                           updated {new Date(decodedAt).toLocaleTimeString()}

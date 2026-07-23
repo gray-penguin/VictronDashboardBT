@@ -79,6 +79,46 @@ export function parseBatteryMonitorFields(plain: Uint8Array): BatteryMonitorFiel
   return fields;
 }
 
+export interface SolarChargerFields {
+  chargeState: number;
+  chargeStateLabel: string;
+  voltage: number; // battery volts
+  current: number; // battery charging amps
+  solarPowerW: number;
+  yieldTodayWh: number;
+}
+
+const CHARGE_STATE_LABELS: Record<number, string> = {
+  0: 'Off',
+  3: 'Bulk',
+  4: 'Absorption',
+  5: 'Float',
+};
+
+// Field layout re-derived empirically against a real capture (readout_type
+// 0x01 matches the reference library's test_solar_charger.py type, and its
+// documented offsets — read_unsigned_int(8) for charge_state — produced
+// implausible values here, e.g. 171V/3123A; shifting every field 8 bits
+// later matched real known-plausible readings exactly: 13.47V/12.2A/68W/
+// 1.69kWh during active solar charging). Load current (9 bits, packed)
+// isn't decoded — not needed and this device likely has nothing wired to it.
+export function parseSolarChargerFields(plain: Uint8Array): SolarChargerFields {
+  const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
+  const chargeState = dv.getUint16(0, true);
+  const voltage = dv.getInt16(2, true) / 100;
+  const current = dv.getInt16(4, true) / 10;
+  const solarPowerW = dv.getUint16(6, true);
+  const yieldTodayWh = dv.getUint16(8, true) * 10;
+  return {
+    chargeState,
+    chargeStateLabel: CHARGE_STATE_LABELS[chargeState] ?? `unknown (${chargeState})`,
+    voltage,
+    current,
+    solarPowerW,
+    yieldTodayWh,
+  };
+}
+
 export function parseVictronAdvertisement(raw: DataView): VictronAdvertisement {
   return {
     prefix: raw.getUint16(0, true),
