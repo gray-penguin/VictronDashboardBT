@@ -5,9 +5,15 @@ import { bytesToHex, decryptVictronAdvertisement, VictronDecryptResult } from '.
 
 const KEYS_STORAGE_KEY = 'victron_dashboard_bt_keys';
 
+const HISTORY_LIMIT = 20;
+
 interface DeviceReading {
   device: BluetoothDevice;
   raw: Uint8Array;
+  history: Uint8Array[]; // newest first, capped at HISTORY_LIMIT — for
+  // spotting which byte positions are truly constant vs. genuinely
+  // encrypted across many real broadcasts, rather than guessing from
+  // one or two samples.
   count: number;
   lastSeen: number;
 }
@@ -54,15 +60,20 @@ export default function App() {
     watching.current.add(device.id);
     try {
       await watchVictronAdvertisements(device, (raw, dev) => {
-        setReadings((prev) => ({
-          ...prev,
-          [dev.id]: {
-            device: dev,
-            raw: new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength).slice(),
-            count: (prev[dev.id]?.count ?? 0) + 1,
-            lastSeen: Date.now(),
-          },
-        }));
+        const bytes = new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength).slice();
+        setReadings((prev) => {
+          const prevHistory = prev[dev.id]?.history ?? [];
+          return {
+            ...prev,
+            [dev.id]: {
+              device: dev,
+              raw: bytes,
+              history: [bytes, ...prevHistory].slice(0, HISTORY_LIMIT),
+              count: (prev[dev.id]?.count ?? 0) + 1,
+              lastSeen: Date.now(),
+            },
+          };
+        });
       });
     } catch (err) {
       watching.current.delete(device.id);
@@ -123,8 +134,14 @@ export default function App() {
           </p>
         )}
 
-        {deviceList.map(({ device, raw, count, lastSeen }) => {
+        {deviceList.map(({ device, raw, history, count, lastSeen }) => {
           const result = decrypted[device.id];
+          // A byte position is "constant" if every captured advertisement of
+          // the SAME total length agrees on that byte — comparing across
+          // different lengths isn't meaningful, since a longer payload likely
+          // has extra fields shifting nothing, but different report variants.
+          const sameLengthHistory = history.filter((h) => h.length === raw.length);
+          const constantMask = Array.from(raw, (_, i) => sameLengthHistory.every((h) => h[i] === raw[i]));
           return (
             <div key={device.id} className="bg-surface border border-line rounded-2xl p-4">
               <div className="flex items-baseline justify-between gap-2">
@@ -134,9 +151,31 @@ export default function App() {
                   {new Date(lastSeen).toLocaleTimeString()}
                 </span>
               </div>
-              <div className="mt-2 text-xs text-ink-4 font-mono break-all">
-                {raw.byteLength} bytes: {bytesToHex(raw)}
+
+              <div className="mt-2 text-xs font-mono break-all">
+                {raw.byteLength} bytes:{' '}
+                {Array.from(raw).map((b, i) => (
+                  <span key={i} className={constantMask[i] ? 'text-orange-400' : 'text-ink-4'}>
+                    {b.toString(16).padStart(2, '0')}{' '}
+                  </span>
+                ))}
+                <span className="text-ink-6">
+                  (orange = constant across all {sameLengthHistory.length}-sample same-length history)
+                </span>
               </div>
+
+              <details className="mt-1">
+                <summary className="text-xs text-ink-6 cursor-pointer select-none">
+                  show last {history.length} captures
+                </summary>
+                <div className="mt-1 space-y-0.5 max-h-48 overflow-y-auto">
+                  {history.map((h, i) => (
+                    <div key={i} className="text-xs text-ink-5 font-mono break-all">
+                      {h.length}b: {bytesToHex(h)}
+                    </div>
+                  ))}
+                </div>
+              </details>
 
               <div className="mt-3 flex items-center gap-2">
                 <label className="text-xs text-ink-5 shrink-0" htmlFor={`key-${device.id}`}>
