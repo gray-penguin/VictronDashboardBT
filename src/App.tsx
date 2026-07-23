@@ -48,6 +48,12 @@ export default function App() {
   const [readings, setReadings] = useState<Record<string, DeviceReading>>({});
   const [keys, setKeys] = useState<Record<string, string>>(loadKeys);
   const [decrypted, setDecrypted] = useState<Record<string, VictronDecryptResult>>({});
+  // Separate from `decrypted` (which reflects the LATEST advertisement,
+  // even an undecodable one) — this only ever updates on a successful
+  // key-check, so the headline reading holds steady through the report
+  // types this device sends that aren't decoded yet, instead of blanking
+  // out and flashing a "waiting" message every other broadcast.
+  const [lastGoodResult, setLastGoodResult] = useState<Record<string, VictronDecryptResult>>({});
   const [decryptError, setDecryptError] = useState<Record<string, string>>({});
   const [lastDecodedAt, setLastDecodedAt] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +83,10 @@ export default function App() {
         .then((result) => {
           if (decryptRequestId.current[device.id] !== requestId) return; // superseded
           setDecrypted((prev) => ({ ...prev, [device.id]: result }));
-          if (result.keyCheckOk) setLastDecodedAt((prev) => ({ ...prev, [device.id]: Date.now() }));
+          if (result.keyCheckOk) {
+            setLastGoodResult((prev) => ({ ...prev, [device.id]: result }));
+            setLastDecodedAt((prev) => ({ ...prev, [device.id]: Date.now() }));
+          }
         })
         .catch((err) => {
           if (decryptRequestId.current[device.id] !== requestId) return;
@@ -168,6 +177,7 @@ export default function App() {
         {deviceList.map(({ device, raw, history, count, lastSeen }) => {
           const decodedAt = lastDecodedAt[device.id];
           const result = decrypted[device.id];
+          const goodResult = lastGoodResult[device.id];
           // A byte position is "constant" if every captured advertisement of
           // the SAME total length agrees on that byte — comparing across
           // different lengths isn't meaningful, since a longer payload likely
@@ -203,9 +213,9 @@ export default function App() {
                 />
               </div>
 
-              {result?.keyCheckOk && result.readoutType === READOUT_TYPE_BATTERY_MONITOR &&
+              {goodResult?.readoutType === READOUT_TYPE_BATTERY_MONITOR &&
                 (() => {
-                  const fields = parseBatteryMonitorFields(result.plainSkippingCheckByte);
+                  const fields = parseBatteryMonitorFields(goodResult.plainSkippingCheckByte);
                   return (
                     <div className="mt-3 flex items-baseline gap-6">
                       <div>
@@ -226,9 +236,9 @@ export default function App() {
                     </div>
                   );
                 })()}
-              {result?.keyCheckOk && result.readoutType === READOUT_TYPE_SOLAR_CHARGER &&
+              {goodResult?.readoutType === READOUT_TYPE_SOLAR_CHARGER &&
                 (() => {
-                  const fields = parseSolarChargerFields(result.plainSkippingCheckByte);
+                  const fields = parseSolarChargerFields(goodResult.plainSkippingCheckByte);
                   return (
                     <div className="mt-3 flex items-baseline gap-6">
                       <div>
@@ -250,7 +260,7 @@ export default function App() {
                     </div>
                   );
                 })()}
-              {result && !result.keyCheckOk && (
+              {!goodResult && result && !result.keyCheckOk && (
                 <div className="mt-2 text-xs text-ink-6">
                   readout type 0x{result.readoutType.toString(16)} — key doesn't check out for this report variant,
                   waiting for the next broadcast type this device sends
