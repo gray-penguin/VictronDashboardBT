@@ -6,17 +6,26 @@ import {
   decryptVictronAdvertisement,
   parseBatteryMonitorFields,
   parseDcDcConverterFields,
+  parseDcEnergyMeterFields,
   parseSolarChargerFields,
   VictronDecryptResult,
 } from './lib/victronCrypto';
 
 // Distinguishes report variants once the key-check byte confirms a report
 // actually decodes — readout_type alone (0x02 = battery monitor, 0x01 =
-// solar charger, 0x04 = DC-DC converter, per the reference library's own
-// test fixtures) selects which field layout to apply.
+// solar charger, 0x04 = DC-DC converter, 0x0d = DC energy meter/shunt, per
+// the reference library's own test fixtures) selects which field layout
+// to apply.
 const READOUT_TYPE_BATTERY_MONITOR = 0x02;
 const READOUT_TYPE_SOLAR_CHARGER = 0x01;
 const READOUT_TYPE_DCDC_CONVERTER = 0x04;
+const READOUT_TYPE_DC_ENERGY_METER = 0x0d;
+const KNOWN_READOUT_TYPES = [
+  READOUT_TYPE_BATTERY_MONITOR,
+  READOUT_TYPE_SOLAR_CHARGER,
+  READOUT_TYPE_DCDC_CONVERTER,
+  READOUT_TYPE_DC_ENERGY_METER,
+];
 
 function celsiusToFahrenheit(c: number): number {
   return (c * 9) / 5 + 32;
@@ -230,9 +239,6 @@ export default function App() {
                           </div>
                         </div>
                       )}
-                      <div className="text-sm text-ink-4">
-                        {fields.current.toFixed(2)}A &middot; {fields.soc.toFixed(0)}% SOC
-                      </div>
                       {decodedAt && (
                         <div className="text-xs text-ink-6 self-end pb-1">
                           updated {new Date(decodedAt).toLocaleTimeString()}
@@ -291,6 +297,36 @@ export default function App() {
                     </div>
                   );
                 })()}
+              {goodResult?.readoutType === READOUT_TYPE_DC_ENERGY_METER &&
+                (() => {
+                  const fields = parseDcEnergyMeterFields(goodResult.plainSkippingCheckByte);
+                  return (
+                    <div className="mt-3 flex items-baseline gap-6">
+                      <div>
+                        <div className="text-3xl font-bold text-ink">{fields.current.toFixed(2)}A</div>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-ink">{fields.voltage.toFixed(2)}V</div>
+                      </div>
+                      {fields.temperatureC !== undefined && (
+                        <div className="text-sm text-ink-4">
+                          {celsiusToFahrenheit(fields.temperatureC).toFixed(0)}&deg;F
+                        </div>
+                      )}
+                      {decodedAt && (
+                        <div className="text-xs text-ink-6 self-end pb-1">
+                          updated {new Date(decodedAt).toLocaleTimeString()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              {goodResult && !(KNOWN_READOUT_TYPES as number[]).includes(goodResult.readoutType) && (
+                <div className="mt-2 text-xs text-ink-6">
+                  readout type 0x{goodResult.readoutType.toString(16)} key-checked OK but has no field parser yet —
+                  see debug info for the decrypted bytes
+                </div>
+              )}
               {!goodResult && result && !result.keyCheckOk && (
                 <div className="mt-2 text-xs text-ink-6">
                   readout type 0x{result.readoutType.toString(16)} — key doesn't check out for this report variant,

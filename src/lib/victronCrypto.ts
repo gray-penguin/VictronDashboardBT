@@ -52,9 +52,6 @@ export interface BatteryMonitorFields {
   starterVoltage?: number;
   midpointVoltage?: number;
   temperatureC?: number;
-  current: number; // amps, signed (negative = discharging)
-  consumedAh: number; // amp-hours, negative = net consumption
-  soc: number; // state of charge, percent
 }
 
 // LSB-first bit reader — confirmed against real data: aux_mode (the first
@@ -94,27 +91,21 @@ class BitReader {
 
 // Field layout confirmed against the reference library's battery_monitor.py
 // (voltage/temperature values matched this device's real VictronConnect
-// reading almost exactly). The first 8 bytes are byte-aligned; aux_mode,
-// current, consumed_ah, and soc are bit-packed (not byte-aligned) starting
-// right after — a real shunt/battery-monitor device (unlike the Smart
-// Battery Sense, which has no current sensing) is expected to populate
-// current/consumedAh/soc with real, non-sentinel values. NOT yet verified
-// against real shunt hardware — check these against VictronConnect's own
-// current/SOC reading once a shunt's key is entered.
+// reading almost exactly). The first 8 bytes are byte-aligned; aux_mode is
+// the low 2 bits of byte 8. Current/consumed_ah/soc (which also live in
+// this report per the reference library) turned out to be meaningless for
+// this device in practice — real shunts apparently report via a DIFFERENT
+// report type (DC Energy Meter, readout_type 0x0d) with their own current
+// field, not this one, so those bit-packed fields aren't decoded here.
 export function parseBatteryMonitorFields(plain: Uint8Array): BatteryMonitorFields {
   const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
   const remainingMins = dv.getUint16(0, true);
   const voltage = dv.getInt16(2, true) / 100;
   const alarm = dv.getUint16(4, true);
   const auxRaw = dv.getUint16(6, true);
+  const auxMode = plain[8] & 0b11;
 
-  const bits = new BitReader(plain.slice(8));
-  const auxMode = bits.readUnsignedInt(2);
-  const current = bits.readSignedInt(22) / 1000;
-  const consumedAh = bits.readUnsignedInt(20) / -10;
-  const soc = bits.readUnsignedInt(10) / 10;
-
-  const fields: BatteryMonitorFields = { remainingMins, voltage, alarm, auxMode, current, consumedAh, soc };
+  const fields: BatteryMonitorFields = { remainingMins, voltage, alarm, auxMode };
   if (auxMode === 0) {
     fields.starterVoltage = (auxRaw > 0x7fff ? auxRaw - 0x10000 : auxRaw) / 100;
   } else if (auxMode === 1) {
@@ -204,6 +195,43 @@ export function parseDcDcConverterFields(plain: Uint8Array): DcDcConverterFields
     inputVoltage: inputRaw === 0xffff ? undefined : inputRaw / 100,
     outputVoltage: outputRaw === 0x7fff ? undefined : outputRaw / 100,
   };
+}
+
+export interface DcEnergyMeterFields {
+  meterType: number;
+  voltage: number; // volts
+  alarm: number;
+  auxMode: number; // 0 = starter voltage, 2 = temperature, 3 = disabled
+  current: number; // amps, signed (real current sensing — this IS the shunt's actual reading)
+  starterVoltage?: number;
+  temperatureC?: number;
+}
+
+// This is the actual shunt report type (SmartShunt/CountryMod AC/Electromaxx
+// etc.) — confirmed via the reference library's test_dc_energy_meter.py
+// fixture BEFORE touching real hardware, all fields matching exactly:
+// voltage 12.52V, current 0.0A, aux_mode 0 (starter voltage) -0.01V.
+// readout_type 0x0d. Byte-aligned layout is the same shape as
+// battery_monitor.py (meter_type instead of remaining_mins) but the
+// bit-packed tail is shorter — just aux_mode + current, no consumed_ah/soc.
+export function parseDcEnergyMeterFields(plain: Uint8Array): DcEnergyMeterFields {
+  const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
+  const meterType = dv.getInt16(0, true);
+  const voltage = dv.getInt16(2, true) / 100;
+  const alarm = dv.getUint16(4, true);
+  const auxRaw = dv.getUint16(6, true);
+
+  const bits = new BitReader(plain.slice(8));
+  const auxMode = bits.readUnsignedInt(2);
+  const current = bits.readSignedInt(22) / 1000;
+
+  const fields: DcEnergyMeterFields = { meterType, voltage, alarm, auxMode, current };
+  if (auxMode === 0) {
+    fields.starterVoltage = (auxRaw > 0x7fff ? auxRaw - 0x10000 : auxRaw) / 100;
+  } else if (auxMode === 2) {
+    fields.temperatureC = auxRaw / 100 - 273.15;
+  }
+  return fields;
 }
 
 export function parseVictronAdvertisement(raw: DataView): VictronAdvertisement {
