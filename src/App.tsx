@@ -5,16 +5,18 @@ import {
   bytesToHex,
   decryptVictronAdvertisement,
   parseBatteryMonitorFields,
+  parseDcDcConverterFields,
   parseSolarChargerFields,
   VictronDecryptResult,
 } from './lib/victronCrypto';
 
 // Distinguishes report variants once the key-check byte confirms a report
 // actually decodes — readout_type alone (0x02 = battery monitor, 0x01 =
-// solar charger, per the reference library's own test fixtures) selects
-// which field layout to apply.
+// solar charger, 0x04 = DC-DC converter, per the reference library's own
+// test fixtures) selects which field layout to apply.
 const READOUT_TYPE_BATTERY_MONITOR = 0x02;
 const READOUT_TYPE_SOLAR_CHARGER = 0x01;
+const READOUT_TYPE_DCDC_CONVERTER = 0x04;
 
 function celsiusToFahrenheit(c: number): number {
   return (c * 9) / 5 + 32;
@@ -252,6 +254,32 @@ export default function App() {
                         {fields.voltage.toFixed(2)}V &middot; {fields.current.toFixed(1)}A &middot;{' '}
                         {fields.chargeStateLabel}
                       </div>
+                      {decodedAt && (
+                        <div className="text-xs text-ink-6 self-end pb-1">
+                          updated {new Date(decodedAt).toLocaleTimeString()}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              {goodResult?.readoutType === READOUT_TYPE_DCDC_CONVERTER &&
+                (() => {
+                  const fields = parseDcDcConverterFields(goodResult.plainSkippingCheckByte);
+                  return (
+                    <div className="mt-3 flex items-baseline gap-6">
+                      <div>
+                        <div className="text-3xl font-bold text-ink">
+                          {fields.inputVoltage !== undefined ? `${fields.inputVoltage.toFixed(2)}V` : '—'}
+                        </div>
+                        <div className="text-xs text-ink-5">input</div>
+                      </div>
+                      <div>
+                        <div className="text-3xl font-bold text-ink">
+                          {fields.outputVoltage !== undefined ? `${fields.outputVoltage.toFixed(2)}V` : '—'}
+                        </div>
+                        <div className="text-xs text-ink-5">output</div>
+                      </div>
+                      <div className="text-sm text-ink-4">{fields.stateLabel}</div>
                       {decodedAt && (
                         <div className="text-xs text-ink-6 self-end pb-1">
                           updated {new Date(decodedAt).toLocaleTimeString()}

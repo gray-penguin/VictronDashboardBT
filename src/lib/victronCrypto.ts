@@ -119,6 +119,47 @@ export function parseSolarChargerFields(plain: Uint8Array): SolarChargerFields {
   };
 }
 
+export interface DcDcConverterFields {
+  state: number | undefined; // undefined = sentinel "no data" (0xff)
+  stateLabel: string;
+  error: number | undefined;
+  inputVoltage: number | undefined; // volts
+  outputVoltage: number | undefined; // volts
+}
+
+const DEVICE_STATE_LABELS: Record<number, string> = {
+  0: 'Off',
+  3: 'Bulk',
+  4: 'Absorption',
+  5: 'Float',
+};
+
+// Field layout confirmed against the reference library's own test fixture
+// (test_dcdc_converter.py) BEFORE trusting it against real hardware — unlike
+// solar_charger.py, this one's documented offsets matched the fixture's
+// expected values exactly (state=Off, error=none, input=13.15V, output=the
+// documented "no data" sentinel), so no empirical re-derivation was needed
+// here. readout_type for this device family is 0x04 (WebFetch's initial
+// summary of the raw hex mis-reported this as 0xc0 — that's actually the
+// byte at offset 2, part of model_id; always recount raw hex by hand rather
+// than trust a summarized offset claim).
+export function parseDcDcConverterFields(plain: Uint8Array): DcDcConverterFields {
+  const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
+  const stateRaw = plain[0];
+  const errorRaw = plain[1];
+  const inputRaw = dv.getUint16(2, true);
+  const outputRaw = dv.getInt16(4, true);
+
+  const state = stateRaw === 0xff ? undefined : stateRaw;
+  return {
+    state,
+    stateLabel: state === undefined ? 'N/A' : (DEVICE_STATE_LABELS[state] ?? `unknown (${state})`),
+    error: errorRaw === 0xff ? undefined : errorRaw,
+    inputVoltage: inputRaw === 0xffff ? undefined : inputRaw / 100,
+    outputVoltage: outputRaw === 0x7fff ? undefined : outputRaw / 100,
+  };
+}
+
 export function parseVictronAdvertisement(raw: DataView): VictronAdvertisement {
   return {
     prefix: raw.getUint16(0, true),
