@@ -1,10 +1,9 @@
 // Victron's Instant Readout payload format, confirmed against the real,
 // widely-used keshavdv/victron-ble Python library's base.py (fetched and
 // cross-checked verbatim, not reconstructed from memory) and validated
-// structurally against real captured advertisements from a Smart Battery
-// Sensor: model_id/readout_type read identically across broadcasts (as a
-// fixed device identity should) while iv correctly varies each time (as a
-// nonce should) — strong evidence this 7-byte header is positioned right.
+// end-to-end against real captured advertisements from a Smart Battery
+// Sensor: decrypted voltage/temperature matched VictronConnect's own live
+// reading almost exactly (13.45V / 97°F vs. ~13.46-13.50V / 95°F).
 //
 // Layout (after the 2-byte company ID 0x02E1 is already stripped by the
 // browser — it's the manufacturerData map key, not part of this payload):
@@ -12,11 +11,17 @@
 //   bytes 2-3: model id       (uint16 LE)
 //   byte   4:  readout type   (uint8)
 //   bytes 5-6: iv/nonce       (uint16 LE)
-//   bytes 7+:  AES-128-CTR ciphertext (the reference library treats byte 7
-//              as an extra unencrypted "key-check byte" before the real
-//              ciphertext — NOT yet confirmed for this specific model,
-//              which isn't in that library's own supported-model table, so
-//              both interpretations are decrypted below for comparison).
+//   byte   7:  key-check byte (must equal the real key's first byte)
+//   bytes 8+:  AES-128-CTR ciphertext
+//
+// IMPORTANT device-specific discovery: this Smart Battery Sensor broadcasts
+// MULTIPLE distinct report types in rotation, distinguished by readout_type
+// and total length — a 23-byte "battery monitor" style report (readout_type
+// 0x02, matches the reference library's own tested format) whose key-check
+// byte correctly matches this device's key, interleaved with 16/27-byte
+// reports (readout_type 0x59) whose key-check byte never matches and whose
+// structure is NOT yet understood. Only the 0x02 report is decoded below —
+// gate on keyCheckOk before trusting a result.
 
 export interface VictronAdvertisement {
   prefix: number;
@@ -27,6 +32,7 @@ export interface VictronAdvertisement {
 }
 
 export interface VictronDecryptResult {
+  readoutType: number;
   keyCheckByte: number;
   keyFirstByte: number;
   keyCheckOk: boolean;
@@ -36,6 +42,41 @@ export interface VictronDecryptResult {
   // encryptedData is an unencrypted key-check byte, real ciphertext starts
   // at byte 1.
   plainSkippingCheckByte: Uint8Array;
+}
+
+export interface BatteryMonitorFields {
+  remainingMins: number;
+  voltage: number; // volts
+  alarm: number;
+  auxMode: number; // 0 = starter voltage, 1 = midpoint voltage, 2 = temperature
+  starterVoltage?: number;
+  midpointVoltage?: number;
+  temperatureC?: number;
+}
+
+// Field layout confirmed against the reference library's battery_monitor.py
+// (voltage/temperature values matched this device's real VictronConnect
+// reading almost exactly). The first 8 bytes are byte-aligned; aux_mode is
+// the low 2 bits of byte 8 (bit-packed fields beyond it — current,
+// consumed_ah, soc — aren't decoded here since this device never reports
+// them, having no current-sensing hardware).
+export function parseBatteryMonitorFields(plain: Uint8Array): BatteryMonitorFields {
+  const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
+  const remainingMins = dv.getUint16(0, true);
+  const voltage = dv.getInt16(2, true) / 100;
+  const alarm = dv.getUint16(4, true);
+  const auxRaw = dv.getUint16(6, true);
+  const auxMode = plain[8] & 0b11;
+
+  const fields: BatteryMonitorFields = { remainingMins, voltage, alarm, auxMode };
+  if (auxMode === 0) {
+    fields.starterVoltage = (auxRaw > 0x7fff ? auxRaw - 0x10000 : auxRaw) / 100;
+  } else if (auxMode === 1) {
+    fields.midpointVoltage = auxRaw / 100;
+  } else if (auxMode === 2) {
+    fields.temperatureC = auxRaw / 100 - 273.15;
+  }
+  return fields;
 }
 
 export function parseVictronAdvertisement(raw: DataView): VictronAdvertisement {
@@ -110,6 +151,7 @@ export async function decryptVictronAdvertisement(raw: DataView, keyHex: string)
   ]);
 
   return {
+    readoutType: adv.readoutType,
     keyCheckByte,
     keyFirstByte,
     keyCheckOk: keyCheckByte === keyFirstByte,

@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bluetooth } from 'lucide-react';
 import { addVictronDevice, getKnownDevices, isWebBluetoothSupported, watchVictronAdvertisements } from './lib/ble';
-import { bytesToHex, decryptVictronAdvertisement, VictronDecryptResult } from './lib/victronCrypto';
+import {
+  bytesToHex,
+  decryptVictronAdvertisement,
+  parseBatteryMonitorFields,
+  VictronDecryptResult,
+} from './lib/victronCrypto';
+
+function celsiusToFahrenheit(c: number): number {
+  return (c * 9) / 5 + 32;
+}
 
 const KEYS_STORAGE_KEY = 'victron_dashboard_bt_keys';
 
@@ -152,31 +161,6 @@ export default function App() {
                 </span>
               </div>
 
-              <div className="mt-2 text-xs font-mono break-all">
-                {raw.byteLength} bytes:{' '}
-                {Array.from(raw).map((b, i) => (
-                  <span key={i} className={constantMask[i] ? 'text-orange-400' : 'text-ink-4'}>
-                    {b.toString(16).padStart(2, '0')}{' '}
-                  </span>
-                ))}
-                <span className="text-ink-6">
-                  (orange = constant across all {sameLengthHistory.length}-sample same-length history)
-                </span>
-              </div>
-
-              <details className="mt-1">
-                <summary className="text-xs text-ink-6 cursor-pointer select-none">
-                  show last {history.length} captures
-                </summary>
-                <div className="mt-1 space-y-0.5 max-h-48 overflow-y-auto">
-                  {history.map((h, i) => (
-                    <div key={i} className="text-xs text-ink-5 font-mono break-all">
-                      {h.length}b: {bytesToHex(h)}
-                    </div>
-                  ))}
-                </div>
-              </details>
-
               <div className="mt-3 flex items-center gap-2">
                 <label className="text-xs text-ink-5 shrink-0" htmlFor={`key-${device.id}`}>
                   Encryption key
@@ -192,23 +176,68 @@ export default function App() {
                 />
               </div>
 
-              {result && (
-                <div className="mt-2 space-y-1">
-                  <div className={`text-xs ${result.keyCheckOk ? 'text-ink-5' : 'text-orange-400'}`}>
-                    key-check byte: 0x{result.keyCheckByte.toString(16).padStart(2, '0')} vs key[0]: 0x
-                    {result.keyFirstByte.toString(16).padStart(2, '0')} ({result.keyCheckOk ? 'match' : 'no match'})
-                  </div>
-                  <div className="text-xs text-ink-3 font-mono break-all">
-                    full: {bytesToHex(result.plainFull)}
-                  </div>
-                  <div className="text-xs text-ink-3 font-mono break-all">
-                    skip-first-byte: {bytesToHex(result.plainSkippingCheckByte)}
-                  </div>
+              {result?.keyCheckOk &&
+                (() => {
+                  const fields = parseBatteryMonitorFields(result.plainSkippingCheckByte);
+                  return (
+                    <div className="mt-3 flex items-baseline gap-6">
+                      <div>
+                        <div className="text-3xl font-bold text-ink">{fields.voltage.toFixed(2)}V</div>
+                      </div>
+                      {fields.temperatureC !== undefined && (
+                        <div>
+                          <div className="text-3xl font-bold text-ink">
+                            {celsiusToFahrenheit(fields.temperatureC).toFixed(0)}&deg;F
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              {result && !result.keyCheckOk && (
+                <div className="mt-2 text-xs text-ink-6">
+                  readout type 0x{result.readoutType.toString(16)} — key doesn't check out for this report variant,
+                  waiting for the next broadcast type this device sends
                 </div>
               )}
               {decryptError[device.id] && (
                 <div className="mt-2 text-xs text-orange-400">{decryptError[device.id]}</div>
               )}
+
+              <details className="mt-3">
+                <summary className="text-xs text-ink-6 cursor-pointer select-none">debug info</summary>
+                <div className="mt-2 text-xs font-mono break-all">
+                  {raw.byteLength} bytes:{' '}
+                  {Array.from(raw).map((b, i) => (
+                    <span key={i} className={constantMask[i] ? 'text-orange-400' : 'text-ink-4'}>
+                      {b.toString(16).padStart(2, '0')}{' '}
+                    </span>
+                  ))}
+                  <span className="text-ink-6">
+                    (orange = constant across all {sameLengthHistory.length}-sample same-length history)
+                  </span>
+                </div>
+                {result && (
+                  <div className="mt-2 space-y-1">
+                    <div className={`text-xs ${result.keyCheckOk ? 'text-ink-5' : 'text-orange-400'}`}>
+                      readout 0x{result.readoutType.toString(16)} &middot; key-check byte: 0x
+                      {result.keyCheckByte.toString(16).padStart(2, '0')} vs key[0]: 0x
+                      {result.keyFirstByte.toString(16).padStart(2, '0')} ({result.keyCheckOk ? 'match' : 'no match'})
+                    </div>
+                    <div className="text-xs text-ink-3 font-mono break-all">full: {bytesToHex(result.plainFull)}</div>
+                    <div className="text-xs text-ink-3 font-mono break-all">
+                      skip-first-byte: {bytesToHex(result.plainSkippingCheckByte)}
+                    </div>
+                  </div>
+                )}
+                <div className="mt-2 space-y-0.5 max-h-48 overflow-y-auto">
+                  {history.map((h, i) => (
+                    <div key={i} className="text-xs text-ink-5 font-mono break-all">
+                      {h.length}b: {bytesToHex(h)}
+                    </div>
+                  ))}
+                </div>
+              </details>
             </div>
           );
         })}
