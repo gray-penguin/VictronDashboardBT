@@ -41,10 +41,15 @@ export default function App() {
   const [keys, setKeys] = useState<Record<string, string>>(loadKeys);
   const [decrypted, setDecrypted] = useState<Record<string, VictronDecryptResult>>({});
   const [decryptError, setDecryptError] = useState<Record<string, string>>({});
+  const [lastDecodedAt, setLastDecodedAt] = useState<Record<string, number>>({});
   const [error, setError] = useState<string | null>(null);
   // Ref (not state) so effect re-runs — StrictMode's double-invoke included
   // — don't start a second watcher on a device that's already being watched.
   const watching = useRef<Set<string>>(new Set());
+  // Guards against out-of-order async resolution: a longer (multi-block)
+  // payload's decrypt can take slightly longer than a shorter one issued
+  // just after it, so a stale result must not overwrite a newer one.
+  const decryptRequestId = useRef<Record<string, number>>({});
 
   useEffect(() => {
     localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
@@ -57,10 +62,19 @@ export default function App() {
     Object.values(readings).forEach(({ device, raw }) => {
       const keyHex = keys[device.id];
       if (!keyHex) return;
+      const requestId = (decryptRequestId.current[device.id] ?? 0) + 1;
+      decryptRequestId.current[device.id] = requestId;
       const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
       decryptVictronAdvertisement(view, keyHex)
-        .then((result) => setDecrypted((prev) => ({ ...prev, [device.id]: result })))
-        .catch((err) => setDecryptError((prev) => ({ ...prev, [device.id]: (err as Error).message })));
+        .then((result) => {
+          if (decryptRequestId.current[device.id] !== requestId) return; // superseded
+          setDecrypted((prev) => ({ ...prev, [device.id]: result }));
+          if (result.keyCheckOk) setLastDecodedAt((prev) => ({ ...prev, [device.id]: Date.now() }));
+        })
+        .catch((err) => {
+          if (decryptRequestId.current[device.id] !== requestId) return;
+          setDecryptError((prev) => ({ ...prev, [device.id]: (err as Error).message }));
+        });
     });
   }, [readings, keys]);
 
@@ -144,6 +158,7 @@ export default function App() {
         )}
 
         {deviceList.map(({ device, raw, history, count, lastSeen }) => {
+          const decodedAt = lastDecodedAt[device.id];
           const result = decrypted[device.id];
           // A byte position is "constant" if every captured advertisement of
           // the SAME total length agrees on that byte — comparing across
@@ -189,6 +204,11 @@ export default function App() {
                           <div className="text-3xl font-bold text-ink">
                             {celsiusToFahrenheit(fields.temperatureC).toFixed(0)}&deg;F
                           </div>
+                        </div>
+                      )}
+                      {decodedAt && (
+                        <div className="text-xs text-ink-6 self-end pb-1">
+                          updated {new Date(decodedAt).toLocaleTimeString()}
                         </div>
                       )}
                     </div>
