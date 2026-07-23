@@ -1,28 +1,60 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bluetooth } from 'lucide-react';
-import {
-  addVictronDevice,
-  dataViewToHex,
-  getKnownDevices,
-  isWebBluetoothSupported,
-  watchVictronAdvertisements,
-} from './lib/ble';
+import { addVictronDevice, getKnownDevices, isWebBluetoothSupported, watchVictronAdvertisements } from './lib/ble';
+import { bytesToHex, decryptVictronAdvertisement, VictronKeyMismatchError } from './lib/victronCrypto';
+
+const KEYS_STORAGE_KEY = 'victron_dashboard_bt_keys';
 
 interface DeviceReading {
   device: BluetoothDevice;
-  hex: string;
-  byteLength: number;
+  raw: Uint8Array;
   count: number;
   lastSeen: number;
+}
+
+interface DecryptResult {
+  hex?: string;
+  error?: string;
+}
+
+function loadKeys(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(KEYS_STORAGE_KEY) || '{}');
+  } catch {
+    return {};
+  }
 }
 
 export default function App() {
   const [supported] = useState(isWebBluetoothSupported());
   const [readings, setReadings] = useState<Record<string, DeviceReading>>({});
+  const [keys, setKeys] = useState<Record<string, string>>(loadKeys);
+  const [decrypted, setDecrypted] = useState<Record<string, DecryptResult>>({});
   const [error, setError] = useState<string | null>(null);
   // Ref (not state) so effect re-runs — StrictMode's double-invoke included
   // — don't start a second watcher on a device that's already being watched.
   const watching = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    localStorage.setItem(KEYS_STORAGE_KEY, JSON.stringify(keys));
+  }, [keys]);
+
+  // Re-attempts decryption whenever a fresh advertisement arrives or a key
+  // is edited — cheap enough at this device count, and means the decrypted
+  // tile updates live as new advertisements come in, not just once.
+  useEffect(() => {
+    Object.values(readings).forEach(({ device, raw }) => {
+      const keyHex = keys[device.id];
+      if (!keyHex) return;
+      const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
+      decryptVictronAdvertisement(view, keyHex)
+        .then((plain) => setDecrypted((prev) => ({ ...prev, [device.id]: { hex: bytesToHex(plain) } })))
+        .catch((err) => {
+          const message = err instanceof VictronKeyMismatchError ? err.message : `Decode error: ${err.message}`;
+          setDecrypted((prev) => ({ ...prev, [device.id]: { error: message } }));
+        });
+    });
+  }, [readings, keys]);
 
   const watch = useCallback(async (device: BluetoothDevice) => {
     if (watching.current.has(device.id)) return;
@@ -33,8 +65,7 @@ export default function App() {
           ...prev,
           [dev.id]: {
             device: dev,
-            hex: dataViewToHex(raw),
-            byteLength: raw.byteLength,
+            raw: new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength).slice(),
             count: (prev[dev.id]?.count ?? 0) + 1,
             lastSeen: Date.now(),
           },
@@ -99,20 +130,43 @@ export default function App() {
           </p>
         )}
 
-        {deviceList.map(({ device, hex, byteLength, count, lastSeen }) => (
-          <div key={device.id} className="bg-surface border border-line rounded-2xl p-4">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="font-medium text-ink-2">{device.name || 'Unnamed device'}</span>
-              <span className="text-xs text-ink-5">
-                {count} advertisement{count === 1 ? '' : 's'} &middot; last seen{' '}
-                {new Date(lastSeen).toLocaleTimeString()}
-              </span>
+        {deviceList.map(({ device, raw, count, lastSeen }) => {
+          const result = decrypted[device.id];
+          return (
+            <div key={device.id} className="bg-surface border border-line rounded-2xl p-4">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="font-medium text-ink-2">{device.name || 'Unnamed device'}</span>
+                <span className="text-xs text-ink-5">
+                  {count} advertisement{count === 1 ? '' : 's'} &middot; last seen{' '}
+                  {new Date(lastSeen).toLocaleTimeString()}
+                </span>
+              </div>
+              <div className="mt-2 text-xs text-ink-4 font-mono break-all">
+                {raw.byteLength} bytes: {bytesToHex(raw)}
+              </div>
+
+              <div className="mt-3 flex items-center gap-2">
+                <label className="text-xs text-ink-5 shrink-0" htmlFor={`key-${device.id}`}>
+                  Encryption key
+                </label>
+                <input
+                  id={`key-${device.id}`}
+                  type="text"
+                  spellCheck={false}
+                  placeholder="paste hex key from VictronConnect"
+                  value={keys[device.id] || ''}
+                  onChange={(e) => setKeys((prev) => ({ ...prev, [device.id]: e.target.value }))}
+                  className="flex-1 min-w-0 bg-surface-2 border border-line-2 rounded-lg px-2 py-1 text-xs font-mono text-ink-3"
+                />
+              </div>
+
+              {result?.hex && (
+                <div className="mt-2 text-xs text-ink-3 font-mono break-all">decrypted: {result.hex}</div>
+              )}
+              {result?.error && <div className="mt-2 text-xs text-orange-400">{result.error}</div>}
             </div>
-            <div className="mt-2 text-xs text-ink-4 font-mono break-all">
-              {byteLength} bytes: {hex}
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </main>
     </div>
   );

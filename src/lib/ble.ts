@@ -46,11 +46,3 @@ export async function watchVictronAdvertisements(
   await device.watchAdvertisements();
   return () => device.removeEventListener('advertisementreceived', handler as EventListener);
 }
-
-export function dataViewToHex(view: DataView): string {
-  const bytes: string[] = [];
-  for (let i = 0; i < view.byteLength; i++) {
-    bytes.push(view.getUint8(i).toString(16).padStart(2, '0'));
-  }
-  return bytes.join(' ');
-}
