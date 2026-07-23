@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Bluetooth } from 'lucide-react';
 import { addVictronDevice, getKnownDevices, isWebBluetoothSupported, watchVictronAdvertisements } from './lib/ble';
-import { bytesToHex, decryptVictronAdvertisement, VictronKeyMismatchError } from './lib/victronCrypto';
+import { bytesToHex, decryptVictronAdvertisement, VictronDecryptResult } from './lib/victronCrypto';
 
 const KEYS_STORAGE_KEY = 'victron_dashboard_bt_keys';
 
@@ -10,11 +10,6 @@ interface DeviceReading {
   raw: Uint8Array;
   count: number;
   lastSeen: number;
-}
-
-interface DecryptResult {
-  hex?: string;
-  error?: string;
 }
 
 function loadKeys(): Record<string, string> {
@@ -29,7 +24,8 @@ export default function App() {
   const [supported] = useState(isWebBluetoothSupported());
   const [readings, setReadings] = useState<Record<string, DeviceReading>>({});
   const [keys, setKeys] = useState<Record<string, string>>(loadKeys);
-  const [decrypted, setDecrypted] = useState<Record<string, DecryptResult>>({});
+  const [decrypted, setDecrypted] = useState<Record<string, VictronDecryptResult>>({});
+  const [decryptError, setDecryptError] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
   // Ref (not state) so effect re-runs — StrictMode's double-invoke included
   // — don't start a second watcher on a device that's already being watched.
@@ -48,11 +44,8 @@ export default function App() {
       if (!keyHex) return;
       const view = new DataView(raw.buffer, raw.byteOffset, raw.byteLength);
       decryptVictronAdvertisement(view, keyHex)
-        .then((plain) => setDecrypted((prev) => ({ ...prev, [device.id]: { hex: bytesToHex(plain) } })))
-        .catch((err) => {
-          const message = err instanceof VictronKeyMismatchError ? err.message : `Decode error: ${err.message}`;
-          setDecrypted((prev) => ({ ...prev, [device.id]: { error: message } }));
-        });
+        .then((result) => setDecrypted((prev) => ({ ...prev, [device.id]: result })))
+        .catch((err) => setDecryptError((prev) => ({ ...prev, [device.id]: (err as Error).message })));
     });
   }, [readings, keys]);
 
@@ -160,10 +153,23 @@ export default function App() {
                 />
               </div>
 
-              {result?.hex && (
-                <div className="mt-2 text-xs text-ink-3 font-mono break-all">decrypted: {result.hex}</div>
+              {result && (
+                <div className="mt-2 space-y-1">
+                  <div className={`text-xs ${result.keyCheckOk ? 'text-ink-5' : 'text-orange-400'}`}>
+                    key-check byte: 0x{result.keyCheckByte.toString(16).padStart(2, '0')} vs key[0]: 0x
+                    {result.keyFirstByte.toString(16).padStart(2, '0')} ({result.keyCheckOk ? 'match' : 'no match'})
+                  </div>
+                  <div className="text-xs text-ink-3 font-mono break-all">
+                    full: {bytesToHex(result.plainFull)}
+                  </div>
+                  <div className="text-xs text-ink-3 font-mono break-all">
+                    skip-first-byte: {bytesToHex(result.plainSkippingCheckByte)}
+                  </div>
+                </div>
               )}
-              {result?.error && <div className="mt-2 text-xs text-orange-400">{result.error}</div>}
+              {decryptError[device.id] && (
+                <div className="mt-2 text-xs text-orange-400">{decryptError[device.id]}</div>
+              )}
             </div>
           );
         })}
