@@ -183,7 +183,6 @@ export default function App() {
             decrypted={decrypted}
             lastGoodResult={lastGoodResult}
             decryptError={decryptError}
-            lastDecodedAt={lastDecodedAt}
             prefs={prefs}
             onPrefsChange={handlePrefsChange}
           />
@@ -195,6 +194,8 @@ export default function App() {
             keys={keys}
             onKeyChange={(id, value) => setKeys((prev) => ({ ...prev, [id]: value }))}
             onAddDevice={handleAddDevice}
+            decrypted={decrypted}
+            lastDecodedAt={lastDecodedAt}
           />
         )}
       </main>

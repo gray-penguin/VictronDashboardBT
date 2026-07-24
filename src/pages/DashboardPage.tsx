@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X } from 'lucide-react';
-import { bytesToHex, VictronDecryptResult } from '../lib/victronCrypto';
+import { VictronDecryptResult } from '../lib/victronCrypto';
 import { buildTileContent } from '../lib/deviceTiles';
 import { DeviceReading } from '../lib/types';
 import { Prefs } from '../lib/storage';
@@ -13,7 +13,6 @@ interface DashboardPageProps {
   decrypted: Record<string, VictronDecryptResult>;
   lastGoodResult: Record<string, VictronDecryptResult>;
   decryptError: Record<string, string>;
-  lastDecodedAt: Record<string, number>;
   prefs: Prefs;
   onPrefsChange: (next: Prefs) => void;
 }
@@ -25,7 +24,6 @@ export default function DashboardPage({
   decrypted,
   lastGoodResult,
   decryptError,
-  lastDecodedAt,
   prefs,
   onPrefsChange,
 }: DashboardPageProps) {
@@ -84,13 +82,10 @@ export default function DashboardPage({
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {visibleKeys.map((id) => {
-          const { device, raw, history, count, lastSeen } = byKey.get(id)!;
-          const decodedAt = lastDecodedAt[id];
+          const { device } = byKey.get(id)!;
           const result = decrypted[id];
           const goodResult = lastGoodResult[id];
           const content = goodResult ? buildTileContent(goodResult.readoutType, goodResult.plainSkippingCheckByte) : null;
-          const sameLengthHistory = history.filter((h) => h.length === raw.length);
-          const constantMask = Array.from(raw, (_, i) => sameLengthHistory.every((h) => h[i] === raw[i]));
 
           return (
             <div
@@ -143,46 +138,6 @@ export default function DashboardPage({
               </button>
 
               {decryptError[id] && <div className="mt-2 text-xs text-orange-400">{decryptError[id]}</div>}
-
-              <details className="mt-2">
-                <summary className="text-xs text-ink-6 cursor-pointer select-none">debug info</summary>
-                <div className="mt-2 text-xs text-ink-5">
-                  {count} advertisement{count === 1 ? '' : 's'} &middot; last seen{' '}
-                  {new Date(lastSeen).toLocaleTimeString()}
-                  {decodedAt && <> &middot; last decoded {new Date(decodedAt).toLocaleTimeString()}</>}
-                </div>
-                <div className="mt-2 text-xs font-mono break-all">
-                  {raw.byteLength} bytes:{' '}
-                  {Array.from(raw).map((b, i) => (
-                    <span key={i} className={constantMask[i] ? 'text-orange-400' : 'text-ink-4'}>
-                      {b.toString(16).padStart(2, '0')}{' '}
-                    </span>
-                  ))}
-                  <span className="text-ink-6">
-                    (orange = constant across all {sameLengthHistory.length}-sample same-length history)
-                  </span>
-                </div>
-                {result && (
-                  <div className="mt-2 space-y-1">
-                    <div className={`text-xs ${result.keyCheckOk ? 'text-ink-5' : 'text-orange-400'}`}>
-                      readout 0x{result.readoutType.toString(16)} &middot; key-check byte: 0x
-                      {result.keyCheckByte.toString(16).padStart(2, '0')} vs key[0]: 0x
-                      {result.keyFirstByte.toString(16).padStart(2, '0')} ({result.keyCheckOk ? 'match' : 'no match'})
-                    </div>
-                    <div className="text-xs text-ink-3 font-mono break-all">full: {bytesToHex(result.plainFull)}</div>
-                    <div className="text-xs text-ink-3 font-mono break-all">
-                      skip-first-byte: {bytesToHex(result.plainSkippingCheckByte)}
-                    </div>
-                  </div>
-                )}
-                <div className="mt-2 space-y-0.5 max-h-48 overflow-y-auto">
-                  {history.map((h, i) => (
-                    <div key={i} className="text-xs text-ink-5 font-mono break-all">
-                      {h.length}b: {bytesToHex(h)}
-                    </div>
-                  ))}
-                </div>
-              </details>
             </div>
           );
         })}
