@@ -1,10 +1,26 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { X } from 'lucide-react';
 import { VictronDecryptResult } from '../lib/victronCrypto';
 import { buildTileContent } from '../lib/deviceTiles';
 import { DeviceReading } from '../lib/types';
 import { Prefs } from '../lib/storage';
 import Tile from '../components/Tile';
+
+// A reading that hasn't been refreshed in this long is more likely stale
+// (device out of range, stopped broadcasting the decodable report type,
+// tab backgrounded) than a real current value — flagged rather than shown
+// with the same confidence as a fresh one. Generous relative to the normal
+// few-seconds-per-report-type cadence, so it won't false-flag normal jitter.
+const STALE_THRESHOLD_MS = 2 * 60_000;
+
+function formatAge(ms: number): string {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.round(minutes / 60);
+  return `${hours}h ago`;
+}
 
 interface DashboardPageProps {
   supported: boolean;
@@ -13,6 +29,7 @@ interface DashboardPageProps {
   decrypted: Record<string, VictronDecryptResult>;
   lastGoodResult: Record<string, VictronDecryptResult>;
   decryptError: Record<string, string>;
+  lastDecodedAt: Record<string, number>;
   prefs: Prefs;
   onPrefsChange: (next: Prefs) => void;
 }
@@ -24,10 +41,18 @@ export default function DashboardPage({
   decrypted,
   lastGoodResult,
   decryptError,
+  lastDecodedAt,
   prefs,
   onPrefsChange,
 }: DashboardPageProps) {
   const [dragKey, setDragKey] = useState<string | null>(null);
+  // Forces a re-render every 10s so age/staleness keeps advancing even when
+  // no new advertisement has arrived to trigger one on its own.
+  const [, tick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => tick((n) => n + 1), 10_000);
+    return () => clearInterval(id);
+  }, []);
 
   const byKey = new Map(deviceList.map((d) => [d.device.id, d]));
   const hidden = new Set(prefs.hiddenTiles);
@@ -86,6 +111,9 @@ export default function DashboardPage({
           const result = decrypted[id];
           const goodResult = lastGoodResult[id];
           const content = goodResult ? buildTileContent(goodResult.readoutType, goodResult.plainSkippingCheckByte) : null;
+          const decodedAt = lastDecodedAt[id];
+          const ageMs = decodedAt ? Date.now() - decodedAt : undefined;
+          const isStale = ageMs !== undefined && ageMs > STALE_THRESHOLD_MS;
 
           return (
             <div
@@ -96,21 +124,27 @@ export default function DashboardPage({
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => handleDrop(id)}
               className={`group relative cursor-grab active:cursor-grabbing transition-opacity ${
-                dragKey === id ? 'opacity-40' : ''
+                dragKey === id ? 'opacity-40' : isStale ? 'opacity-60' : ''
               }`}
             >
               {content ? (
-                <Tile
-                  icon={content.icon}
-                  label={device.name || 'Unnamed device'}
-                  value={content.value}
-                  valueAside={content.valueAside}
-                  sublabel={content.sublabel}
-                  sublabel2={content.sublabel2}
-                  badge={content.badge}
-                  stats={content.stats}
-                  accent="orange"
-                />
+                <>
+                  <Tile
+                    icon={content.icon}
+                    label={device.name || 'Unnamed device'}
+                    value={content.value}
+                    valueAside={content.valueAside}
+                    sublabel={content.sublabel}
+                    sublabel2={content.sublabel2}
+                    badge={content.badge}
+                    stats={content.stats}
+                    accent="orange"
+                  />
+                  <div className={`mt-1 text-xs ${isStale ? 'text-orange-400' : 'text-ink-6'}`}>
+                    {isStale ? 'Stale — ' : 'Updated '}
+                    {ageMs !== undefined ? formatAge(ageMs) : ''}
+                  </div>
+                </>
               ) : (
                 <div className="bg-surface border border-line rounded-2xl p-5 h-full">
                   <div className="text-xs font-medium text-ink-4 mb-3">{device.name || 'Unnamed device'}</div>

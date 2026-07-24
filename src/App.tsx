@@ -183,6 +183,7 @@ export default function App() {
             decrypted={decrypted}
             lastGoodResult={lastGoodResult}
             decryptError={decryptError}
+            lastDecodedAt={lastDecodedAt}
             prefs={prefs}
             onPrefsChange={handlePrefsChange}
           />
