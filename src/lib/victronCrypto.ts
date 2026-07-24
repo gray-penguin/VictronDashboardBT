@@ -139,12 +139,22 @@ const CHARGE_STATE_LABELS: Record<number, string> = {
 // later matched real known-plausible readings exactly: 13.47V/12.2A/68W/
 // 1.69kWh during active solar charging). Load current (9 bits, packed)
 // isn't decoded — not needed and this device likely has nothing wired to it.
+//
+// solar_power quirk (found live, nighttime): unlike voltage/current/yield —
+// which all correctly settle to 0/near-0 when the charger goes idle — this
+// field freezes on a fixed nonzero value (confirmed 0x0077 = 119 constant
+// across 6 real captures spanning different IVs/timestamps, not just one
+// odd sample) instead of reporting 0W. A charger reporting Off genuinely
+// cannot be delivering real power regardless of what this raw field says,
+// so it's forced to 0 whenever chargeState is Off — a state-gate rather
+// than a value-sentinel, since the raw value isn't a clean sentinel pattern
+// like the other device types' fields use.
 export function parseSolarChargerFields(plain: Uint8Array): SolarChargerFields {
   const dv = new DataView(plain.buffer, plain.byteOffset, plain.byteLength);
   const chargeState = dv.getUint16(0, true);
   const voltage = dv.getInt16(2, true) / 100;
   const current = dv.getInt16(4, true) / 10;
-  const solarPowerW = dv.getUint16(6, true);
+  const solarPowerW = chargeState === 0 ? 0 : dv.getUint16(6, true);
   const yieldTodayWh = dv.getUint16(8, true) * 10;
   return {
     chargeState,
