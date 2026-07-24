@@ -68,8 +68,8 @@ export function buildTileContent(readoutType: number, plain: Uint8Array): TileCo
       const f = parseDcEnergyMeterFields(plain);
       return {
         icon: <Gauge size={16} />,
-        value: `${f.current.toFixed(2)}A`,
-        sublabel: `${f.voltage.toFixed(2)}V`,
+        value: `${f.powerW.toFixed(0)}W`,
+        sublabel: `${f.voltage.toFixed(2)}V · ${f.current.toFixed(2)}A`,
         sublabel2: f.temperatureC !== undefined ? `${celsiusToFahrenheit(f.temperatureC).toFixed(0)}°F` : undefined,
       };
     }
@@ -108,7 +108,7 @@ export function extractHistoryFields(readoutType: number, plain: Uint8Array): Re
     }
     case READOUT_TYPE_DC_ENERGY_METER: {
       const f = parseDcEnergyMeterFields(plain);
-      const fields: Record<string, number> = { voltage: f.voltage, current: f.current };
+      const fields: Record<string, number> = { voltage: f.voltage, current: f.current, powerW: f.powerW };
       if (f.temperatureC !== undefined) fields.temperatureC = f.temperatureC;
       return fields;
     }

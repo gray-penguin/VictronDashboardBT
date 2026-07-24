@@ -213,6 +213,7 @@ export interface DcEnergyMeterFields {
   alarm: number;
   auxMode: number; // 0 = starter voltage, 2 = temperature, 3 = disabled
   current: number; // amps, signed (real current sensing — this IS the shunt's actual reading)
+  powerW: number; // derived voltage * current — valid here since both are measured at the same shunt
   starterVoltage?: number;
   temperatureC?: number;
 }
@@ -235,7 +236,7 @@ export function parseDcEnergyMeterFields(plain: Uint8Array): DcEnergyMeterFields
   const auxMode = bits.readUnsignedInt(2);
   const current = bits.readSignedInt(22) / 1000;
 
-  const fields: DcEnergyMeterFields = { meterType, voltage, alarm, auxMode, current };
+  const fields: DcEnergyMeterFields = { meterType, voltage, alarm, auxMode, current, powerW: voltage * current };
   if (auxMode === 0) {
     fields.starterVoltage = (auxRaw > 0x7fff ? auxRaw - 0x10000 : auxRaw) / 100;
   } else if (auxMode === 2) {
